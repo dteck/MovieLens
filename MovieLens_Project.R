@@ -47,6 +47,7 @@ edx$timestamp<-date(as_datetime(edx$timestamp)) #convert timestamp to human date
 #--------------
 
 #basic data set information
+edxdim<-dim(edx)
 n_distinct(edx$movieId) #number of movies
 n_distinct(edx$userId) #numbr of users
 #----------------
