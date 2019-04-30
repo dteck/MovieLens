@@ -135,3 +135,62 @@ a<-append(a,str_match_all(edx$title[i],"\\([^\\d]*(\\d+)[^\\d]*\\)")[[1]][2])
 # }else{
 #   print("5")
 # }
+
+
+a<-lm(rating~as.factor(movieId), data = edx) #cant allocate memory for this
+mu<-mean(edx$rating)
+movieAvg<-edx %>% group_by(movieId) %>% summarise(b_i=mean(rating-mu))
+
+predicted_ratings <- mu + validation %>% 
+  left_join(movieAvg, by='movieId') %>%
+  .$b_i
+
+RMSE(predicted_ratings, validation$rating)
+
+
+user_avgs <- validation %>% 
+  left_join(movieAvg, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+
+predicted_ratings <- validation %>% 
+  left_join(movieAvg, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  .$pred
+RMSE(predicted_ratings, validation$rating)
+
+
+#-------------------------------------
+mu <- mean(train_set$rating) 
+movie_avgs <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(b_i = mean(rating - mu))
+
+predicted_ratings <- mu + test_set %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  .$b_i
+
+model_1_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie Effect Model",
+                                     RMSE = model_1_rmse ))
+rmse_results %>% knitr::kable()
+#-------------------------------------------------
+user_avgs <- validation %>% 
+  left_join(movieAvg, by='movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+
+predicted_ratings <- test_set %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_avgs, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  .$pred
+
+model_2_rmse <- RMSE(predicted_ratings, test_set$rating)
+rmse_results <- bind_rows(rmse_results,
+                          data_frame(method="Movie + User Effects Model",  
+                                     RMSE = model_2_rmse ))
+rmse_results %>% knitr::kable()
+#-------------------------------------------
