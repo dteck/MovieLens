@@ -137,8 +137,9 @@ a<-append(a,str_match_all(edx$title[i],"\\([^\\d]*(\\d+)[^\\d]*\\)")[[1]][2])
 # }
 
 
-a<-lm(rating~as.factor(movieId), data = edx) #cant allocate memory for this
+
 mu<-mean(edx$rating)
+
 movieAvg<-edx %>% group_by(movieId) %>% summarise(b_i=mean(rating-mu))
 
 predicted_ratings <- mu + validation %>% 
@@ -148,7 +149,7 @@ predicted_ratings <- mu + validation %>%
 RMSE(predicted_ratings, validation$rating)
 
 
-user_avgs <- validation %>% 
+user_avgs <- edx %>% 
   left_join(movieAvg, by='movieId') %>%
   group_by(userId) %>%
   summarize(b_u = mean(rating - mu - b_i))
@@ -159,13 +160,13 @@ predicted_ratings <- validation %>%
   mutate(pred = mu + b_i + b_u) %>%
   .$pred
 RMSE(predicted_ratings, validation$rating)
-
+0.8292477
 
 #-------------------------------------
 mu <- mean(train_set$rating) 
-movie_avgs <- train_set %>% 
+movie_avgs <- edx %>% 
   group_by(movieId) %>% 
-  summarize(b_i = mean(rating - mu))
+  summarize(b_i = mean(rating - totalAvg))
 
 predicted_ratings <- mu + test_set %>% 
   left_join(movie_avgs, by='movieId') %>%
@@ -194,3 +195,113 @@ rmse_results <- bind_rows(rmse_results,
                                      RMSE = model_2_rmse ))
 rmse_results %>% knitr::kable()
 #-------------------------------------------
+
+
+
+
+
+
+
+
+#----movie effect
+totalAvg<- mean(edx$rating)
+movieAvg<-edx %>% group_by(movieId) %>% summarise(movieEffect=mean(rating-totalAvg))
+predictions <-  totalAvg + validation %>% left_join(movieAvg, by='movieId') %>% .$movieEffect
+RMSE(predictions, validation$rating)
+
+#----user effect
+userPref<-edx %>% group_by(userId) %>% 
+  summarize(userEffect=mean(rating - totalAvg))
+predictions2 <-  totalAvg + validation %>% left_join(userPref, by='userId') %>% .$userEffect
+RMSE(predictions2, validation$rating)
+
+#---combined effect
+predicted_ratings <- validation %>% 
+  left_join(movieAvg, by='movieId') %>%
+  left_join(userPref, by='userId') %>%  
+  mutate(pred = totalAvg + movieEffect + userEffect) %>% .$pred
+
+RMSE(predicted_ratings, validation$rating)
+
+
+# user_avgs <- validation %>% 
+#   left_join(movieAvg, by='movieId') %>%
+#   group_by(userId) %>%
+#   summarize(b_u = mean(rating - mu - b_i))
+
+
+
+
+
+
+
+
+userEffect<-edx %>% group_by(userId) %>% summarize(userEffect = mean(rating)) %>% 
+  filter(n()>=100) 
+
+plot(y=userEffect$userEffect, x=userEffect$userId, 
+     main = "Average Star Rating by User", 
+     ylab = "Average Rating", xlab = "User ID")
+abline(a=3.5,b=0, col="Red")
+
+
+
+
+
+
+totalAvg=mean(edx$rating)
+
+
+movieAvg <- edx %>% group_by(movieId) %>% summarize(movieAvg = mean(rating - totalAvg))
+hist(movieAvg$movieAvg, main = "Moive Avg Difference From Overall Average", 
+     xlab = "Movie Average Difference", col="Yellow")
+
+moviePredict <- totalAvg + validation %>% left_join(movieAvg, by='movieId') %>%
+  .$movieAvg
+
+movieRMSE <- RMSE(moviePredict,validation$rating)
+movieRMSE
+
+
+
+
+userEffect<-edx %>% group_by(userId) %>% summarize(userEffect = mean(rating- totalAvg)) %>% 
+  filter(n()>=100) 
+
+plot(y=userEffect$userEffect, x=userEffect$userId, 
+     main = "Difference in Average Star Rating by User", 
+     ylab = "Difference from Overall Average Rating", xlab = "User ID")
+abline(a=0,b=0, col="Red")
+
+
+userPredict <- totalAvg + validation %>% left_join(userEffect, by='userId') %>%
+  .$userEffect
+userRMSE <- RMSE(userPredict,validation$rating)
+userRMSE
+
+
+
+
+cutoff<-integer() #initialize list
+for (i in seq(25,800,25)){ #iterate over values 0 to 5
+  userEffect<-edx %>% group_by(userId) %>% summarize(userEffect = mean(rating- totalAvg)) %>% 
+    filter(n()>=i)
+  userPredict <- totalAvg + validation %>% left_join(userEffect, by='userId') %>%
+    .$userEffect
+  cutoff<-append(cutoff,RMSE(userPredict,validation$rating),i-10) #calculate RMSE
+  
+}
+plot(cutoff)
+#doesnt actually do the calculations - filter by n did nothing
+
+
+
+totalAvg=mean(edx$rating)
+usermovie <- validation %>% 
+  left_join(movieAvg, by='movieId') %>%
+  left_join(userEffect, by='userId') %>%
+  mutate(pred = totalAvg + movieAvg + userEffect) %>%
+  .$pred
+
+combinRMSE <- RMSE(usermovie, validation$rating)
+combinRMSE

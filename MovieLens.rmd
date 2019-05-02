@@ -170,15 +170,71 @@ barplot(height = genres$Freq, names.arg = genres$Var1, main = "Genre frequency",
 
 This plot shows that Film-Noir and Horror actually make up a very small percentage of the data. So it would not be much benifit to adjust for genres. This implies we should investigate other aspects of the data and other methods for making predictions.
 
+
+
+**Movies**
+
+while the genre averages may not provide much insight it could be that the information isnt granular enough. Here we are going to look at the movies themselves and see if indivigual movies deviate from the average of 3.5 stars. Logically it woudl make sense that some movies are generally considered good and would be rated above the average. It also seems quite probable that there are moves that are generally bad and will be rated below the average.
+We will use the following code to generate the averages for each indivigual movie. It will then generate a plot showing how frequency of the difference from the overall average.
+
+```{r movieEffect}
+movieAvg <- edx %>% group_by(movieId) %>% summarize(movieAvg = mean(rating - trainMean))
+hist(movieAvg$movieAvg, main = "Moive Avg Difference From Overall Average", 
+     xlab = "Movie Average Difference", col="Yellow")
+```
+
+From this graph we can see that most movies fall within the 2.5 to 4.5 star range, with a majority of those falling below the average of 3.5 stars. 
+Now we will use these movie averages and see if including them in our model can lower our RMSE. The following code builds a set of predictions by adding or subtracting the difference from the overall average for each movie. It then passes those predictions to the RMSE fucntion to calcuate our score. 
+
+```{r mE RMSE}
+moviePredict <- trainMean + validation %>% left_join(movieAvg, by='movieId') %>%
+  .$movieAvg
+
+movieRMSE <- RMSE(moviePredict,validation$rating)
+```
+
+This incluson gives us an RMSE of `r movieRMSE` which is below our previous score of `r FixedAvg`. There are still improvments that need to be made if we intend to reach our goal of 0.8775.
+
 **Users**
   
-In a sysem where the gola is to predict a users taste in movies it may be benificial to invesitgate users and the ratings they have provided. We will start by building averages for each user. This should tell us if a user is someone who scores movies high or low in general.
+In a sysem where the goal is to predict a users taste in movies it may be benificial to invesitgate users and the ratings they have provided. We will start by building averages for each user. It may be the case that some users score movies low over all and others score them high overall. To examine if this is worthwhile we can build a plot of users and their average ratings and see how they deviate from the overall average. The following code will calcuate this average for users with more than 100 ratings and then plot the difference in their average ratings with a red line idicating the overall average. 
 
 
+```{r userPref}
+userEffect<-edx %>% group_by(userId) %>% summarize(userEffect = mean(rating- trainMean)) %>% 
+  filter(n()>=100) 
+
+plot(y=userEffect$userEffect, x=userEffect$userId, 
+     main = "Difference in Average Star Rating by User", 
+     ylab = "Difference from Overall Average Rating", xlab = "User ID")
+abline(a=0,b=0, col="Red")
+```
 
 
+We can see there are a significant number of users who deviate from the average with there ratings. so now lets build a model with this uder effect acounted for. The following code will take the average rating users give and add or subtract it from the overall average and then calculate the RMSE.
+
+```{r uE RMSE}
+userPredict <- trainMean + validation %>% left_join(userEffect, by='userId') %>%
+  .$userEffect
+userRMSE <- RMSE(userPredict,validation$rating)
+```
 
 
+Adjusting for users average rating gives and RMSE of `r userRMSE` which is again below the result of simply seting the average as our estimate which gave an RMSE of `r FixedAvg`. It however is not as good as adjusting for the average score based on movie. which gave an RMSE of `r movieRMSE`. 
+
+Given that both of these methods have given better results than just averaging across all the data we can try combining them into one algorithm to see if together than can provide even better results. The following code will take the movie effect and the user effect into account and generate an RMSE score.
+
+```{r Combo RMSE}
+usermovie <- validation %>% 
+  left_join(movieAvg, by='movieId') %>%
+  left_join(userEffect, by='userId') %>%
+  mutate(pred = trainMean + movieAvg + userEffect) %>%
+  .$pred
+
+combinRMSE <- RMSE(usermovie, validation$rating)
+```
+
+When both of these methods are combined we get tantalizingly close to our target. The resulting RMSE is `r combinRMSE` which is just `r combinRMSE-0.87750` away from where we want to be.  
 
 
 
