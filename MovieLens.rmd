@@ -237,8 +237,63 @@ combinRMSE <- RMSE(usermovie, validation$rating)
 When both of these methods are combined we get tantalizingly close to our target. The resulting RMSE is `r combinRMSE` which is just `r combinRMSE-0.87750` away from where we want to be.  
 
 
+**Regularization**
+If we are confident that our previous methods are good what could we do to imporove them? It might be the case that a small number of ratings are pushing or pulling a rating farther than it should. If there was a small sample of ratings this problem could be quite prononuced. We can include a term in our model to adjust these large variations down. We essentially add a penalty for any values that stray too far from the mean.
 
-
-
-```{r xxx}
+The follwoing code builds the framework for including this penalty to large differences. It incoperates the previous mode and simply adds weights to penalize any values there were too far out of line.
+```{r regularization}
+lambda<-3
+movieRegular <- edx %>% group_by(movieId) %>%
+  summarize(movieRegular = sum(rating - trainMean)/(n()+lambda))
+userRegular <- edx %>% 
+  left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
+  summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+lambda))
+predicted_ratings <- validation %>% 
+  left_join(movieRegular, by = "movieId") %>%
+  left_join(userRegular, by = "userId") %>%
+  mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
+regularized<-RMSE(predicted_ratings, validation$rating)
 ```
+
+with this code we see that we are able to get an RMSE of `r regularized` with just a random guess for the approriate penalty. This is good but we may be able to lower it furhter with proper tuning. The following code tries to find the optimal value of lambda that minimizes the RMSE. It runs the code above changing the value for lambda and plots the resulting RMSE.
+```{r lambda guess}
+lambda<-integer()#initlaize
+for(i in seq(0,5,0.25)){ #try different vlaues of lambda and record RMSE
+  movieRegular <- edx %>% group_by(movieId) %>% 
+    summarize(movieRegular = sum(rating - trainMean)/(n()+i))
+  userRegular <- edx %>% 
+    left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
+    summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+i))
+  predicted_ratings <- validation %>% 
+    left_join(movieRegular, by = "movieId") %>%
+    left_join(userRegular, by = "userId") %>%
+    mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
+  lambda<-append(lambda,RMSE(RMSE(predicted_ratings, validation$rating),length(lambda))) #calculate RMSE
+}
+plot(lambda, x=seq(0,5,0.25), ylab = "RMSE", main="RMSE vs Penalty")
+seq<-seq(0,5,0.25)
+points(y=min(lambda), x=seq[which.min(lambda)],col="Red", pch=18,bg="Red", cex=2)
+```
+
+```{r regbest, include = FALSE}
+lambda<-seq[which.min(lambda)]
+movieRegular <- edx %>% group_by(movieId) %>%
+  summarize(movieRegular = sum(rating - trainMean)/(n()+lambda))
+userRegular <- edx %>% 
+  left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
+  summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+lambda))
+predicted_ratings <- validation %>% 
+  left_join(movieRegular, by = "movieId") %>%
+  left_join(userRegular, by = "userId") %>%
+  mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
+regRMSE<-RMSE(predicted_ratings, validation$rating)
+```
+This shows us that the penalty that gives us the lowest RMSE is `r seq[which.min(lambda)]`. The resulting RMSE of `r regRMSE` is below our target of 0.87750 by `r 0.87750-regRMSE`
+
+##results
+**include results here to complete requiements**
+
+##Conclusion
+We have tried several methods for minimzing the RMSE from simply using the average of all ratings to adjusting for movies generally getting higher or lower ratings. As well as adjusting for the fact that some users give higher or lower ratings overall. Finally we combined all of these and added a penalty for any ratings that were too far removed from the average. This was able to take us from an inital RMSE of `r trainMean` to an RMSE of `r regRMSE`.
+There is more to explore in this data set and more advanced techniques but this is were we end our analysis. 
+

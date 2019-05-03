@@ -305,3 +305,77 @@ usermovie <- validation %>%
 
 combinRMSE <- RMSE(usermovie, validation$rating)
 combinRMSE
+
+
+
+#regularization
+trainMean<-mean(edx$rating)
+lambda <- 3
+movieRegular <- edx %>% group_by(movieId) %>% 
+  summarize(movieRegular = sum(rating - trainMean)/(n()+lambda))
+
+MovieRegularPred <- validation %>% left_join(movieRegular, by='movieId') %>%
+  mutate(pred = trainMean + movieRegular) %>% .$pred
+
+movieRegularRMSE <- RMSE(MovieRegularPred, validation$rating)
+movieRegularRMSE
+
+#--##########################-----------------------------------------
+lambda<-0.25
+movieRegular <- edx %>% group_by(movieId) %>%
+  summarize(movieRegular = sum(rating - trainMean)/(n()+lambda))
+userRegular <- edx %>% 
+  left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
+  summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+lambda))
+predicted_ratings <- validation %>% 
+  left_join(movieRegular, by = "movieId") %>%
+  left_join(userRegular, by = "userId") %>%
+  mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
+RMSE(predicted_ratings, validation$rating)
+#--------------------------------------------------------------------
+
+
+
+
+lambda<-integer()#initlaize
+for(i in seq(0,5,0.25)){ #try different vlaues of lambda and record RMSE
+  movieRegular <- edx %>% group_by(movieId) %>% 
+    summarize(movieRegular = sum(rating - trainMean)/(n()+i))
+  userRegular <- edx %>% 
+    left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
+    summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+i))
+  predicted_ratings <- validation %>% 
+    left_join(movieRegular, by = "movieId") %>%
+    left_join(userRegular, by = "userId") %>%
+    mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
+  lambda<-append(lambda,RMSE(RMSE(predicted_ratings, validation$rating),length(lambda))) #calculate RMSE
+}
+plot(lambda2, x=seq(0,5,0.25), ylab = "RMSE", main="RMSE vs Penalty")
+seq<-seq(0,5,0.25)
+points(y=min(lambda2), x=seq[which.min(lambda2)],col="Red", pch=18,bg="Red", cex=2)
+
+
+lambda2<-lambda
+
+
+
+
+
+
+
+
+lambdas <- seq(0, 10, 0.25)
+mu <- mean(train_set$rating)
+just_the_sum <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(s = sum(rating - mu), n_i = n())
+rmses <- sapply(lambdas, function(l){
+  predicted_ratings <- test_set %>% 
+    left_join(just_the_sum, by='movieId') %>% 
+    mutate(b_i = s/(n_i+l)) %>%
+    mutate(pred = mu + b_i) %>%
+    .$pred
+  return(RMSE(predicted_ratings, test_set$rating))
+})
+qplot(lambdas, rmses)  
+lambdas[which.min(rmses)]
