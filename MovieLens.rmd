@@ -1,8 +1,10 @@
 ---
 title: "Minimizing RMSE with MovieLens Dataset"
 author: "Mark Richards"
-date: "4/30/2019"
-output: pdf_document
+date: "5/3/2019"
+output:
+  pdf_document: default
+  word_document: default
 urlcolor: blue
 ---
 
@@ -11,115 +13,108 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Introduction
-This paper will outline the process of building a recommendation system for the MovieLens data set. It will cover several methods for building predictions and measure their performance using the root mean squared error (RMSE) of the predictions vs a know set of rating. The goal is to reach a RMSE of 0.87750 or lower.
-  
-In order to test different prediction methods we will start by building training and validation data sets. These will be created by partitioning the available MovieLens 10M data set. The training set will contain 90% of the available data while the validation set contains the remaining 10%. We will then perform some basic investigation of the training set to see what information is available. from there we will start testing different algorithms to find which methods perform best. Ultimately we hope to reach an RMSE of 0.87750 or lower.
-  
-**Note: ** Much of the code will contain "If" statements that load results of calculations if the RDS file containing them is available. This is due to limited computing power. The main code chunks are being run on an instance or R server and this report is being written on a laptop. The files loaded will be made available on [GitHub](https://github.com/dteck/MovieLens) providing they are not above the current file size limit of 100MB.
+This paper will outline the process of building a recommendation system for the MovieLens 10M data set. It will cover several methods for building predictions and measure their performance using the root mean squared error (RMSE) of the predictions. The goal is to reach a RMSE of 0.87750 or lower.
+
 
 ## Analysis
-We will start by loading the necessary packages for the analysis. These include the Tidyverse, Caret, and several others. 
+In order to test the prediction methods, we will start by building a training and a validation data set. These sets will be created by partitioning the available MovieLens 10M data. The training set will contain 90% of the available data while the validation set contains the remaining 10%.  This gives us a large sample to train our models on and a small set to test their accuracy with. 
+
+**Note:**
+Many of the code blocks will contain IF statements that load results of calculations if there is an RDS file available that contains the results. Due to limited computing power on the laptop this report is being written on. Sections that were computationally intensive were offloaded to a server running R and the results were saved to RDS files. Loading them in allows the laptop to bypass this while still providing the necessary code. Any of the intermediate files that fall below the 100MB limit will be available on [GitHub](https://github.com/dteck/MovieLens)
+
+The first step is to load the necessary packages for performing the analysis. These include the Tidyverse, Caret, and several others. 
+
 ```{r libs, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(caret)
-library(ggplot2)
 library(dplyr)
 library(lubridate)
 ```
-  
-Next we will build the training and validation data sets. This code will check to see if the resulting data sets are available in the working directory as RDS files. If not it will download the MovieLens data and build the training and validations sets. The code to download the MoveLens 10M data set and build the training and vlidation partitions is provided by Harvard as part of their [capstone course for a profesional certification in Data Science](https://www.edx.org/course/data-science-capstone).
+
+Once the necessary packages are loaded, we need to build the training and validation data sets. The base code to perform this is provided by Harvard as part of the Capstone course for its Professional Certification in [Data Science](https://www.edx.org/course/data-science-capstone). Since this process is computationally intensive it includes a check for the resulting files in the working directory. If it finds both the training and the validation set it skips running the code and simply loads the RDS files. If it cannot find one or both of the sets it will download the dataset and build the partitions.
+
 ```{r dataset, warning=FALSE, message=FALSE}
-test<-file_test("-f","validation.rds") #checks to see if test set data exists
-train<-file_test("-f","edx.rds") #checks to see if training set data exists
+test<-file_test("-f","validation.rds") #checks for test set data
+train<-file_test("-f","edx.rds") #checks for training set data
 
-if (test & train == FALSE) { #run code block if one or both files are not available
-  dl <- tempfile() # Following code chunk provided by Harvard EdX Capstone Course.
+if (test & train == FALSE) { #Run if one/both files are not available
+  dl <- tempfile() # Code provided by Harvard EdX Capstone Course.
   download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
-
   ratings <- read.table(text = gsub("::", "\t", 
                                     readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
                         col.names = c("userId", "movieId", "rating", "timestamp"))
-
   movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
   colnames(movies) <- c("movieId", "title", "genres")
   movies <- as.data.frame(movies) %>% 
     mutate(movieId = as.numeric(levels(movieId))[movieId],
                                              title = as.character(title),
                                              genres = as.character(genres))
-
   movielens <- left_join(ratings, movies, by = "movieId")
-
   # Validation set will be 10% of MovieLens data
-
   set.seed(1)
   test_index <- createDataPartition(y = movielens$rating, 
                                     times = 1, p = 0.1, list = FALSE)
   edx <- movielens[-test_index,]
   temp <- movielens[test_index,]
-  rm(test,train) #removes the file checks
+  rm(test,train) #remove file checks
 }else { #run if both files exist
-  edx<-readRDS("edx.rds") #reads the generated edx training set
-  validation<-readRDS("validation.rds") #reads the generated validation test set
-  rm(test,train) #removes the file checks
+  edx<-readRDS("edx.rds") #read training set
+  validation<-readRDS("validation.rds") #read validation set
+  rm(test,train) #remove file checks
 }
 ```
 
+For convenience lets convert the date stamps of reviews to just the year the review was submitted.
 
-For convenience lets convert the date stamps of reviews to just the year the review was submitted
 ```{r dates}
-edx$timestamp<-date(as_datetime(edx$timestamp)) #convert timestamp to years
+edx$timestamp<-date(as_datetime(edx$timestamp)) #convert time to years
 ```
 
+To start let’s look at some basic information about the training data set. How large is it? How many unique movies are in it? How many unique users are in it? We can use the code below to examine these parts of the data.
 
-
-Now we can start looking at some basic information about the data set. We might want to know how large it is, how many movies are in it, or how many users are in it. We can check all of these things with a few simple lines of code. 
 ```{r basic info, message=FALSE, results="hide"}
-edxdim<-dim(edx) #dimentions of the data set, name allows inline insertion with text
+edxdim<-dim(edx) #dimentions of the data set
 NumMovies<-n_distinct(edx$movieId) #number of movies
-NumUsers<-n_distinct(edx$userId) #numbr of users
+NumUsers<-n_distinct(edx$userId) #number of users
 ```
 
+It appears that the training set contains `r edxdim[1]` reviews with `r edxdim[2]` variables. There are `r NumMovies` different movies as well as `r NumUsers` unique users that provided ratings.
 
-From this we can see that the training set contains `r edxdim[1]` reviews with `r edxdim[2]` variables. Inside this data there are `r NumMovies` different movies that have reviews. There are also `r NumUsers` users who provided ratings for those movies.
+Now that we know a little about the data set itself, we can start looking at the ratings themselves. A good starting point is to find out what the average rating given is across the entire training set.  The code below will build a histogram of the ratings in the training set. 
 
 
-
-It might be useful to look at how many stars are generally given in the training set. We can build a plot showing the frequency of the different star ratings with the following code. 
 ```{r star distro}
-hist(x=edx$rating, main = "Frequency of Star Ratings", xlab = "Star Ratings",
-     col ="yellow", breaks = seq(0,5,0.5)) #plot of star ratings in training set
+hist(x=edx$rating, main = "Frequency of Star Ratings", 
+     xlab = "Star Ratings",
+     col ="yellow", breaks = seq(0,5,0.5)) #plot ratings
 ```
 
- 
 From this graph we can see that 3 and 4 stars are the most common ratings given. To get an exact value we can take the average of all of the ratings in the training set with the following code.
 
- 
 ```{r star avg, results="hide"}
-trainMean<-mean(edx$rating) #average for all of the ratings in the training set
+trainMean<-mean(edx$rating) #average for all ratings
 ```
 
+The average rating across the entire training set is `r trainMean` stars. This number seems to confirm the plot shown above. We would expect the average to fall between the 3 and 4 star range.
 
-Here we see that the average rating is `r trainMean` stars. This fits with the plot shown above. Now what if we were to just use this average as our guess for the ratings in the validation set. What would the RMSE be?
+Now that we know the average rating, we can start investigating the RMSE. First, we need to define the calculation of the RMSE. The calculation is going to be the difference created by subtracting the true rating from our predicted rating. The difference is then squared and averaged. This average is then rooted to return the RMSE. Now since we will be using this calculation for testing all of our methods we will save some time by building it as a user defined function in R.
 
-
-
-To determine that we need to define the RMSE. We will build the RMSE as a function so we can call it and feed it our results. the following code will create a function for this. It calculates the error by subtracting the true rating from our predicted value. Then squaring the results and taking the average. This resulting average is then rooted to return the RMSE.
 ```{r RMSE}
 RMSE <- function(true_ratings, predicted_ratings){ #function to calc RMSE 
   sqrt(mean((true_ratings - predicted_ratings)^2))
 }
 ```
 
+Now that the function is ready, we can feed it our first model. This is going to be simply using the average of the training set as the predicted rating for all of the movies in the validation set.
 
-
-with this function in place we can now test our prediction of using the average star rating for all unknown ratings. To do this we set the true_rating for the RMSE function to the validation set ratings and our predicted rating to the average for the training set. 
 ```{r Fixed Avg, results="hide"}
 FixedAvg<-RMSE(validation$rating,mean(edx$rating))
 ```
 
+After running this code, we get an RMSE of `r FixedAvg` This is a good baseline to measure the rest of our models against, but it does not come close to our goal value of 0.87750.
 
+The next logical step is to see if there is any fixed star rating value that can lower the RMSE. We would expect the average to be the lowest but to be sure we can use the following code to check. It will build a list all values between 0 stars and 5 stars and calculate the RMSE for all of them and plot the results to find the lowest value we can achieve.
 
-The resulting RMSE is `r FixedAvg` This is a good baseline to measure the rest of our models against but it does not come close to the goal value of 0.87750. The next logical step is to see if there is any fixed star rating value that can lower the RMSE. We would expect the average to be the lowest but to be sure we can use the following code to check. It will build a list all values between 0 stars and 5 stars and calculate the RMSE then plot the results to find the lowest value we can achieve.
 ```{r Fixed all}
 fixed<-integer() #initialize list
 for (i in seq(0,5,0.1)){ #iterate over values 0 to 5
@@ -132,23 +127,23 @@ points(y=min(fixed), x=(which.min(fixed)/10)-0.1,col="Red",
        pch=18,bg="Red", cex=2) #add red point at lowest RMSE value
 ```
 
+The plot shows that the star value of 3.5 gives us the lowest possible RMSE that can be achieved by guessing a fixed value. It also confirms our inital thought that using the average would provide the lowest RMSE.
 
-From the plot we can see that the star value of 3.5 gives us the lowest possible RMSE of 1.06 by guessing a fixed value. This confirms the inital thought that using the average would provide the best RMSE.
+If we can’t just guess a set value that gives us the RMSE that we desire, we need to explore the features of the data. As a starting point we will take a look at the genres and see if there are any significant differences in rating between the genres. To do this we need to separate the genre tags into individual rows. The following code will separate these genre tags by the pipe delimiter. Again, this process is computationally intensive so the code will first check to see if the resulting data frame is available as an RDS before committing to rerunning the code. 
 
-
-Continuing in this direction it might be worthwhile to investigate if different genres have different average ratings. Perhaps setting the prediction based on the genre average would yield better results. The current data set provides the reviews with a list of genres tagged to each entry as a single string. We can separate these out and create rows for each review and each genre using the code below. This operation can take some time to complete so it will check to see if an RDS of the data is available first. If it is, it will simply load the file rather than run the whole process.
 ```{r SeparateGenre}
-genre<-file_test("-f","genres.rds") #checks to see if test set data exists
+genre<-file_test("-f","genres.rds") #checks data exists
 if (genre == FALSE) {
-  genres<-separate_rows(edx, genres, sep = "[|]") #create a df showing 1 genre tag per row
+  genres<-separate_rows(edx, genres, sep = "[|]") #df showing 1 genre per row
   rm(genre)
 }else {
-  genres<-readRDS("genres.rds") #reads the generated edx training set
+  genres<-readRDS("genres.rds") #read generated set
   rm(genre)
 }
 ```
 
-Now that the data has been separated we can take a look at the averages for each of the genres with this code. This will create a dataframe showing each genre and the average star rating for that genre. It will also add a red line at the overall average of 3.5 stars.
+Now that we have separated the genres out, we can calculate the average for each genre. The code will create a data frame each genre that shows the name and the average star rating for that genre. Once all the averages are calculated it creates a bar chart showing the average for the different genres. It also adds a red line at the overall average of 3.5 stars.
+
 ```{r genreAvg}
 genreList<-data.frame(genres=unique(genres$genres), avg=0)
 for (i in seq(1,length(genreList$genres),1)){
@@ -161,30 +156,28 @@ barplot(names.arg =genreList$genres, height =genreList$avg, las=2,
 abline(a=3.5,b=0, col="Red")
 ```
 
-From this graph we can see that the ratings center around the overall average. None of them vary too much with the largest deviations being Film-Noir and Horror. If these movies make up a dispropritanely large numer of the reviews in the training set then it might be worthwhile to adjust for genes.
-To find the number of movies in the data we can use the following code.
+The graph seems to indicate that the genre ratings center around the overall average. With none of them vary too much. The largest deviations are the genres of Film-Noir and Horror. If these genres make up a disproportionally large number of the reviews in the training set, then it might be worthwhile to adjust for genes. To find the number of movies that are in each genre we can use the following code.
+
 ```{r genreFreq}
 genres<-data.frame(table(genres$genres))
 barplot(height = genres$Freq, names.arg = genres$Var1, main = "Genre frequency", las=2) 
 ```
 
-This plot shows that Film-Noir and Horror actually make up a very small percentage of the data. So it would not be much benifit to adjust for genres. This implies we should investigate other aspects of the data and other methods for making predictions.
+This plot shows that Film-Noir and Horror only make up a very small proportion of the data. So, it would not be much benefit to adjust for genres. This implies we should investigate other aspects of the data and other methods for making predictions.
 
+**Movie Effects**
 
-
-**Movies**
-
-while the genre averages may not provide much insight it could be that the information isnt granular enough. Here we are going to look at the movies themselves and see if indivigual movies deviate from the average of 3.5 stars. Logically it woudl make sense that some movies are generally considered good and would be rated above the average. It also seems quite probable that there are moves that are generally bad and will be rated below the average.
-We will use the following code to generate the averages for each indivigual movie. It will then generate a plot showing how frequency of the difference from the overall average.
+While the genre averages may not provide much insight, it could be that the information isn’t granular enough. Here we are going to look at the movies themselves and see if individual movies deviate significantly from the average of 3.5 stars. Logically it would make sense that some movies are generally considered good and would be rated above the average. It also seems quite reasonable that there are moves which are generally considered bad and will be rated below the average. The following code will generate the averages for each indivigual movie. Then create a plot showing the severity and the frequency of the differences.
 
 ```{r movieEffect}
 movieAvg <- edx %>% group_by(movieId) %>% summarize(movieAvg = mean(rating - trainMean))
-hist(movieAvg$movieAvg, main = "Moive Avg Difference From Overall Average", 
+hist(movieAvg$movieAvg, main = "Movie Avg Difference From Overall Average", 
      xlab = "Movie Average Difference", col="Yellow")
 ```
 
-From this graph we can see that most movies fall within the 2.5 to 4.5 star range, with a majority of those falling below the average of 3.5 stars. 
-Now we will use these movie averages and see if including them in our model can lower our RMSE. The following code builds a set of predictions by adding or subtracting the difference from the overall average for each movie. It then passes those predictions to the RMSE fucntion to calcuate our score. 
+The graph shows that most movies fall within the 2.5 to 4.5 star range, with a majority of ratings falling below the average. 
+
+Now we will use these movie averages and see if including them in our model can lower our RMSE. The following code builds a set of predictions by adding or subtracting the difference from the overall average for each movie. It then passes those predictions to the RMSE fucntion to calculate our score.
 
 ```{r mE RMSE}
 moviePredict <- trainMean + validation %>% left_join(movieAvg, by='movieId') %>%
@@ -193,15 +186,16 @@ moviePredict <- trainMean + validation %>% left_join(movieAvg, by='movieId') %>%
 movieRMSE <- RMSE(moviePredict,validation$rating)
 ```
 
-This incluson gives us an RMSE of `r movieRMSE` which is below our previous score of `r FixedAvg`. There are still improvments that need to be made if we intend to reach our goal of 0.8775.
+This model gives us an RMSE of `r movieRMSE` which is below our previous score of `r FixedAvg` where we simply guessed a fixed value for every movie. There are still improvments that need to be made if we intend to reach our goal of 0.87750 but we seem to be moving in the right direction again.
 
-**Users**
+
+**User Effects**
   
-In a sysem where the goal is to predict a users taste in movies it may be benificial to invesitgate users and the ratings they have provided. We will start by building averages for each user. It may be the case that some users score movies low over all and others score them high overall. To examine if this is worthwhile we can build a plot of users and their average ratings and see how they deviate from the overall average. The following code will calcuate this average for users with more than 100 ratings and then plot the difference in their average ratings with a red line idicating the overall average. 
-
+In a sysem where the goal is to predict a users taste in movies it may be benificial to invesitgate users and the ratings they have provided. Similar to how we built averages for each movie. We will now build averages for each individual user. It may be the case that some users score movies low over all and others score them high overall. The following code will calcuate this average for users with more than 100 ratings and then plot the difference in their average ratings with a red line idicating the overall average.
 
 ```{r userPref}
-userEffect<-edx %>% group_by(userId) %>% summarize(userEffect = mean(rating- trainMean)) %>% 
+userEffect<-edx %>% group_by(userId) %>% 
+  summarize(userEffect = mean(rating- trainMean)) %>% 
   filter(n()>=100) 
 
 plot(y=userEffect$userEffect, x=userEffect$userId, 
@@ -210,8 +204,7 @@ plot(y=userEffect$userEffect, x=userEffect$userId,
 abline(a=0,b=0, col="Red")
 ```
 
-
-We can see there are a significant number of users who deviate from the average with there ratings. so now lets build a model with this uder effect acounted for. The following code will take the average rating users give and add or subtract it from the overall average and then calculate the RMSE.
+We can see there are a significant number of users who deviate from the average with there ratings. So now let’s build a model that accounts for this user effect. The following code will take the average rating users give and add or subtract it from the overall average and then calculate the RMSE.
 
 ```{r uE RMSE}
 userPredict <- trainMean + validation %>% left_join(userEffect, by='userId') %>%
@@ -219,10 +212,9 @@ userPredict <- trainMean + validation %>% left_join(userEffect, by='userId') %>%
 userRMSE <- RMSE(userPredict,validation$rating)
 ```
 
+Adjusting for a users average rating gives and RMSE of `r userRMSE` which is also below the RMSE achieved by simply suing a fixed star value. It however is not as good as adjusting for the average score based on movie which gave an RMSE of `r movieRMSE`.
 
-Adjusting for users average rating gives and RMSE of `r userRMSE` which is again below the result of simply seting the average as our estimate which gave an RMSE of `r FixedAvg`. It however is not as good as adjusting for the average score based on movie. which gave an RMSE of `r movieRMSE`. 
-
-Given that both of these methods have given better results than just averaging across all the data we can try combining them into one algorithm to see if together than can provide even better results. The following code will take the movie effect and the user effect into account and generate an RMSE score.
+Since both of these methods have given better results than just averaging across the data we can try combining them into one algorithm to see if together they can provide even better results. The following code will take the movie effect and the user effect into account and generate an RMSE score.
 
 ```{r Combo RMSE}
 usermovie <- validation %>% 
@@ -234,13 +226,13 @@ usermovie <- validation %>%
 combinRMSE <- RMSE(usermovie, validation$rating)
 ```
 
-When both of these methods are combined we get tantalizingly close to our target. The resulting RMSE is `r combinRMSE` which is just `r combinRMSE-0.87750` away from where we want to be.  
+When both methods are combined, we get extremely close to our target. The resulting RMSE is `r combinRMSE` which is just `r combinRMSE-0.87750` away from where we want to be. We just need a small push to improve our results.
 
 
 **Regularization**
-If we are confident that our previous methods are good what could we do to imporove them? It might be the case that a small number of ratings are pushing or pulling a rating farther than it should. If there was a small sample of ratings this problem could be quite prononuced. We can include a term in our model to adjust these large variations down. We essentially add a penalty for any values that stray too far from the mean.
 
-The follwoing code builds the framework for including this penalty to large differences. It incoperates the previous mode and simply adds weights to penalize any values there were too far out of line.
+If we are confident that our previous methods are good what can we do to imporove them? It might be the case that a small number of ratings are pushing or pulling a prediction farther than it should. We can include a term in our model to adjust any large variations back down. Essentially any values that we are unsure of due to low number of ratings get coerced back towards the mean. The following code builds the framework for including this penalty. It incoperates the previous mode and simply adds weights to any values that are too far out of line. Here we use three as a starting point.
+
 ```{r regularization}
 lambda<-3
 movieRegular <- edx %>% group_by(movieId) %>%
@@ -255,45 +247,20 @@ predicted_ratings <- validation %>%
 regularized<-RMSE(predicted_ratings, validation$rating)
 ```
 
-with this code we see that we are able to get an RMSE of `r regularized` with just a random guess for the approriate penalty. This is good but we may be able to lower it furhter with proper tuning. The following code tries to find the optimal value of lambda that minimizes the RMSE. It runs the code above changing the value for lambda and plots the resulting RMSE.
-```{r lambda guess}
-lambda<-integer()#initlaize
-for(i in seq(0,5,0.25)){ #try different vlaues of lambda and record RMSE
-  movieRegular <- edx %>% group_by(movieId) %>% 
-    summarize(movieRegular = sum(rating - trainMean)/(n()+i))
-  userRegular <- edx %>% 
-    left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
-    summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+i))
-  predicted_ratings <- validation %>% 
-    left_join(movieRegular, by = "movieId") %>%
-    left_join(userRegular, by = "userId") %>%
-    mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
-  lambda<-append(lambda,RMSE(RMSE(predicted_ratings, validation$rating),length(lambda))) #calculate RMSE
-}
-plot(lambda, x=seq(0,5,0.25), ylab = "RMSE", main="RMSE vs Penalty")
-seq<-seq(0,5,0.25)
-points(y=min(lambda), x=seq[which.min(lambda)],col="Red", pch=18,bg="Red", cex=2)
-```
-
-```{r regbest, include = FALSE}
-lambda<-seq[which.min(lambda)]
-movieRegular <- edx %>% group_by(movieId) %>%
-  summarize(movieRegular = sum(rating - trainMean)/(n()+lambda))
-userRegular <- edx %>% 
-  left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
-  summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+lambda))
-predicted_ratings <- validation %>% 
-  left_join(movieRegular, by = "movieId") %>%
-  left_join(userRegular, by = "userId") %>%
-  mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
-regRMSE<-RMSE(predicted_ratings, validation$rating)
-```
-This shows us that the penalty that gives us the lowest RMSE is `r seq[which.min(lambda)]`. The resulting RMSE of `r regRMSE` is below our target of 0.87750 by `r 0.87750-regRMSE`
+Adding this penalty to our model does improve our RMSE and lowers it to `r regularized` It appears that corralling stray results is a viable method for improving a model.
 
 ##results
-**include results here to complete requiements**
+By calculating the average of the training set we were able to build a baseline RMSE. We were then able to leverage the average ratings that each individual movie receives to lower the RMSE. The same process was applied to the individual users to account for their preferences. We then employed regularization to adjust any results that had a low number of ratings back towards the mean. This gave us the final model seen in the analysis section which resulted in an RMSE of `r regularized` Which is comfortably below our stated goal of 0.87750. A Table summarizing the results is included below.
+
+```{r Results}
+Results<-data.frame(Method=c("Overall Average","Movie Effects",
+                             "User Effects","Combined Movie/User",
+                             "Regularized Movie/User"), 
+                    RMSE=c(FixedAvg,movieRMSE,userRMSE,
+                           combinRMSE,regularized))
+Results
+```
 
 ##Conclusion
-We have tried several methods for minimzing the RMSE from simply using the average of all ratings to adjusting for movies generally getting higher or lower ratings. As well as adjusting for the fact that some users give higher or lower ratings overall. Finally we combined all of these and added a penalty for any ratings that were too far removed from the average. This was able to take us from an inital RMSE of `r trainMean` to an RMSE of `r regRMSE`.
-There is more to explore in this data set and more advanced techniques but this is were we end our analysis. 
+We tried several methods for minimzing the RMSE from simply using the average of all ratings to adjusting for movies generally getting higher or lower ratings. As well as adjusting for the fact that some users give higher or lower ratings overall. Finally we combined all of these and added a penalty for any predicted ratings that were uncertain. This was able to take us from an inital RMSE of 1.06 to an RMSE of `r regularized`. There is more to explore in this data set and more advanced techniques but this is were we end our analysis.
 

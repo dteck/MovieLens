@@ -321,7 +321,7 @@ movieRegularRMSE <- RMSE(MovieRegularPred, validation$rating)
 movieRegularRMSE
 
 #--##########################-----------------------------------------
-lambda<-0.25
+lambda<-5
 movieRegular <- edx %>% group_by(movieId) %>%
   summarize(movieRegular = sum(rating - trainMean)/(n()+lambda))
 userRegular <- edx %>% 
@@ -379,3 +379,31 @@ rmses <- sapply(lambdas, function(l){
 })
 qplot(lambdas, rmses)  
 lambdas[which.min(rmses)]
+
+
+
+lambdaset<-file_test("-f","lambda.RDS") #checks to see if training set data exists
+
+if (lambdaset == FALSE) { #run code block if one or both files are not available
+  lambda<-integer()#initlaize
+  for(i in seq(0,5,0.25)){ #try different vlaues of lambda and record RMSE
+    movieRegular <- edx %>% group_by(movieId) %>% 
+      summarize(movieRegular = sum(rating - trainMean)/(n()+i))
+    userRegular <- edx %>% 
+      left_join(movieRegular, by="movieId") %>% group_by(userId) %>%
+      summarize(userRegular = sum(rating - movieRegular - trainMean)/(n()+i))
+    predicted_ratings <- validation %>% 
+      left_join(movieRegular, by = "movieId") %>%
+      left_join(userRegular, by = "userId") %>%
+      mutate(pred = trainMean + movieRegular + userRegular) %>% .$pred
+    lambda<-append(lambda,RMSE(RMSE(predicted_ratings, validation$rating),length(lambda)))
+    rm(lambdaset)
+  }
+} else {
+  lambda<-readRDS("lambda.RDS") #reads the generated edx training set
+  rm(lambdaset)
+}
+  plot(lambda, x=seq(0,5,0.25), ylab = "RMSE", main="RMSE vs Penalty")
+  seq<-seq(0,5,0.25)
+  points(y=min(lambda), x=seq[which.min(lambda)],col="Red", pch=18,bg="Red", cex=2)
+  
